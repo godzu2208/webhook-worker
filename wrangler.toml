@@ -1,0 +1,8 @@
+name = "zalo-gas-proxy"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# URL /exec của Google Apps Script Web App (đặt dạng biến môi trường,
+# không hard-code trong code để dễ đổi khi bạn deploy lại GAS mới)
+[vars]
+GAS_URL = "https://script.google.com/macros/s/AKfycbyAAK97If4xeacJe8CacBg3yqFv0lLJ02UdfejZevenAvkxKcuu3KHRQsC6lk_IQc1CTQ/exec"
