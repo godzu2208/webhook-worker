@@ -1,4 +1,4 @@
-name = "zalo-gas-proxy"
+name = "webhook-worker"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 
