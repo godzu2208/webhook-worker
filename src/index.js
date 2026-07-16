@@ -21,7 +21,7 @@ export default {
     if (!GAS_URL || GAS_URL.includes("REPLACE_WITH_YOUR_DEPLOYMENT_ID")) {
       return jsonError(
         "Worker chưa được cấu hình GAS_URL. Vào Cloudflare Dashboard > Worker > Settings > Variables để cập nhật.",
-        500
+        500,
       );
     }
 
@@ -39,13 +39,36 @@ export default {
         redirect: "follow", // Apps Script luôn 302 redirect sang googleusercontent.com
       };
 
+      let rawBody = "";
       if (request.method === "POST") {
         init.headers = { "Content-Type": "application/json" };
-        init.body = await request.text();
+        rawBody = await request.text();
+        init.body = rawBody;
       }
+
+      // DEBUG LOG: xem qua `npx wrangler tail` để biết chính xác
+      // Zalo gửi gì tới Worker (method, content-type gốc, body thô).
+      console.log(
+        JSON.stringify({
+          debug: "incoming_request",
+          method: request.method,
+          incoming_content_type: request.headers.get("content-type"),
+          body_length: rawBody.length,
+          body_preview: rawBody.slice(0, 500),
+          query: url.search,
+        }),
+      );
 
       const upstream = await fetch(upstreamUrl, init);
       const text = await upstream.text(); // đọc trọn body -> loại bỏ chunked encoding
+
+      console.log(
+        JSON.stringify({
+          debug: "upstream_response",
+          status: upstream.status,
+          body_preview: text.slice(0, 500),
+        }),
+      );
 
       return jsonResponse(text, upstream.status);
     } catch (err) {
