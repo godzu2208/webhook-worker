@@ -2,7 +2,23 @@ name = "webhook-worker"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 
-# URL /exec của Google Apps Script Web App (đặt dạng biến môi trường,
-# không hard-code trong code để dễ đổi khi bạn deploy lại GAS mới)
+# ID của Google Sheet chứa 3 sheet: PRODUCT, DATA, PRICELIST.
+# Không phải secret (chỉ là ID sheet), nên để thẳng ở đây cho tiện.
 [vars]
-GAS_URL = "https://script.google.com/macros/s/AKfycbxEY40P_pDL_JGbpFfClfXD-Z-kSUYe1iW5Hlazum_DzSHIxorqVaAxYoDALixkhdAF/exec"
+SPREADSHEET_ID = "1MwAmvOteWfJvfFkhYIp-3ecy_xd5w5I1bQJOetORgYM"
+
+# KHÔNG đặt 2 biến dưới đây ở [vars] (sẽ bị lộ trong wrangler.toml
+# / dashboard dưới dạng plaintext). Set bằng lệnh CLI (sẽ hỏi bạn
+# nhập giá trị, không lưu vào file này):
+#
+#   npx wrangler secret put GOOGLE_CLIENT_EMAIL
+#     -> dán giá trị "client_email" trong file JSON key của Service Account
+#
+#   npx wrangler secret put GOOGLE_PRIVATE_KEY
+#     -> dán NGUYÊN VẸN giá trị "private_key" trong file JSON key
+#        (bao gồm cả -----BEGIN PRIVATE KEY----- / -----END PRIVATE KEY-----
+#        và các \n bên trong - worker tự xử lý cả 2 dạng \n literal
+#        lẫn xuống dòng thật)
+#
+# Sau khi set xong 2 secret trên, deploy lại:
+#   npx wrangler deploy
