@@ -5,4 +5,4 @@ compatibility_date = "2024-11-01"
 # URL /exec của Google Apps Script Web App (đặt dạng biến môi trường,
 # không hard-code trong code để dễ đổi khi bạn deploy lại GAS mới)
 [vars]
-GAS_URL = "https://script.google.com/macros/s/AKfycbyk7WP2BKUvdKuilbNnunR9LeB5UTTGnbYqvZ5ikAtIVkw0MbBLaoNDbgQ1fu_vGY4eFw/exec"
+GAS_URL = "https://script.google.com/macros/s/AKfycbzjBWR-0NN-Nsc3Nx1PAN7RPvReo3ceYc6PSz9OeOAeiGRHXB_yepqqzkBqyXI06M8yOg/exec"
