@@ -13,11 +13,41 @@
  *   - Đọc hết response body (loại bỏ chunked), rồi trả lại với
  *     Content-Type: application/json (không có charset) và Content-Length chính xác.
  *
- * Cập nhật: dùng ctx.waitUntil() để đảm bảo request tới GAS luôn
- * chạy XONG (ghi Sheet xong) dù Zalo có hủy kết nối gốc giữa chừng
- * vì chờ quá lâu (~4s). Nếu không có waitUntil, Cloudflare có thể
- * dừng Worker giữa lúc GAS đang ghi dữ liệu -> mất dữ liệu.
+ * CẬP NHẬT (fix retry rỗng):
+ *   - Quan sát log cho thấy: dù GAS trả lời "Ok" đầy đủ, Zalo vẫn tự
+ *     bắn 1 request retry (không kèm body) sau ~3s nếu request gốc
+ *     chưa nhận được response ĐỦ NHANH theo ngưỡng chờ nội bộ của
+ *     Zalo (không cố định, dao động tùy tải GAS cold-start...).
+ *     Không thể triệt tiêu hoàn toàn việc này chỉ bằng tối ưu tốc độ
+ *     GAS, vì ngưỡng chờ đó nằm ngoài tầm kiểm soát của mình.
+ *   - Giải pháp: Worker luôn đua (Promise.race) giữa việc chờ GAS trả
+ *     lời và một timeout nội bộ AN TOÀN (~2.8s, nhỏ hơn ngưỡng ~4s mà
+ *     Zalo hay dùng để hủy + retry). Nếu GAS trả lời kịp trong 2.8s ->
+ *     trả luôn kết quả thật. Nếu KHÔNG kịp -> chủ động trả một tin
+ *     nhắn tạm "đang xử lý" cho Zalo NGAY, thay vì im lặng để Zalo tự
+ *     hủy và bắn request rỗng (gây lỗi xấu / trùng lặp).
+ *   - Request tới GAS vẫn tiếp tục chạy NGẦM sau khi đã trả response
+ *     tạm cho Zalo, nhờ ctx.waitUntil() -> đảm bảo Sheet vẫn được ghi
+ *     đầy đủ dù client đã "bỏ đi".
+ *
+ *   LƯU Ý QUAN TRỌNG (giới hạn của giải pháp này):
+ *   Khi rơi vào nhánh timeout, tin nhắn "đang xử lý" là placeholder,
+ *   KHÔNG phải kết quả thật (vd: không biết chính xác là kích hoạt
+ *   thành công hay lỗi, sản phẩm gì, giá bao nhiêu). GAS xử lý xong ở
+ *   background nhưng KHÔNG có cách nào tự đẩy kết quả thật đó ngược
+ *   lại cho khách qua chính lượt chat này, vì kết nối gốc đã đóng.
+ *   Muốn khách nhận được kết quả thật trong trường hợp timeout, cần
+ *   thêm bước gọi Zalo OA Send Message API (chủ động gửi tin) từ phía
+ *   GAS sau khi ghi Sheet xong - đây là việc nằm ngoài phạm vi sửa
+ *   nhanh này, cần user_id (đã có sẵn trong payload) + access token
+ *   của OA để gọi API gửi tin nhắn broadcast/transaction.
  */
+
+const GAS_TIMEOUT_MS = 2800; // nhỏ hơn ngưỡng cancel ~4s của Zalo, có buffer an toàn
+
+const PROCESSING_MESSAGE =
+  "⏳ Yêu cầu của Quý khách đang được xử lý, vui lòng đợi trong giây lát rồi kiểm tra lại " +
+  "hoặc liên hệ nhân viên nếu không thấy phản hồi sau ít phút.";
 
 export default {
   async fetch(request, env, ctx) {
@@ -64,9 +94,10 @@ export default {
         }),
       );
 
-      // Gọi GAS độc lập với vòng đời response gửi về Zalo: dù Zalo
-      // hủy kết nối, promise này vẫn tiếp tục chạy nhờ ctx.waitUntil
-      // bên dưới -> đảm bảo GAS ghi Sheet xong.
+      // Gọi GAS độc lập với vòng đời response gửi về Zalo: dù mình trả
+      // response tạm cho Zalo trước (nhánh timeout bên dưới), promise
+      // này vẫn tiếp tục chạy nhờ ctx.waitUntil -> đảm bảo GAS ghi
+      // Sheet xong.
       const upstreamPromise = fetch(upstreamUrl, init).then(
         async (upstream) => {
           const text = await upstream.text(); // đọc trọn body -> loại bỏ chunked encoding
@@ -89,14 +120,54 @@ export default {
         }),
       );
 
-      const { text, status } = await upstreamPromise;
+      // Đua giữa: (a) GAS trả lời kịp, (b) hết 2.8s vẫn chưa có gì.
+      const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => resolve({ timedOut: true }), GAS_TIMEOUT_MS);
+      });
 
-      return jsonResponse(text, status);
+      const winner = await Promise.race([upstreamPromise, timeoutPromise]);
+
+      if (winner && winner.timedOut) {
+        console.log(
+          JSON.stringify({
+            debug: "gas_timeout_fallback",
+            method: request.method,
+            query: url.search,
+            note:
+              "GAS chưa trả lời trong " +
+              GAS_TIMEOUT_MS +
+              "ms, trả placeholder cho Zalo. GAS vẫn chạy ngầm.",
+          }),
+        );
+        return buildTimeoutResponse(request.method);
+      }
+
+      // GAS trả lời kịp -> trả nguyên kết quả thật
+      return jsonResponse(winner.text, winner.status);
     } catch (err) {
       return jsonError("Proxy error: " + err.message, 500);
     }
   },
 };
+
+/**
+ * Response tạm khi GAS chưa kịp trả lời trong ngưỡng an toàn.
+ * - POST (doPost / chatbot) -> đúng schema "version: chatbot" mà Bot
+ *   Studio mong đợi, để hiển thị tin nhắn tạm tử tế thay vì lỗi xấu.
+ * - GET (doGet / Dynamic AI) -> đúng schema { success, message } mà
+ *   doGet vẫn trả, để Dynamic AI không bị crash khi parse.
+ */
+function buildTimeoutResponse(method) {
+  const body =
+    method === "POST"
+      ? JSON.stringify({
+          version: "chatbot",
+          content: { messages: [{ type: "text", text: PROCESSING_MESSAGE }] },
+        })
+      : JSON.stringify({ success: false, message: PROCESSING_MESSAGE });
+
+  return jsonResponse(body, 200);
+}
 
 /**
  * Trả JSON response với Content-Type và Content-Length chuẩn (không chunked, không charset)
