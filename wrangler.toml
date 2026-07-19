@@ -2,23 +2,38 @@ name = "webhook-worker"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 
-# ID của Google Sheet chứa 3 sheet: PRODUCT, DATA, PRICELIST.
-# Không phải secret (chỉ là ID sheet), nên để thẳng ở đây cho tiện.
+# ID của Google Sheet chứa PRODUCT, DATA, PRICELIST, NHANVIEN (mới).
 [vars]
 SPREADSHEET_ID = "1MwAmvOteWfJvfFkhYIp-3ecy_xd5w5I1bQJOetORgYM"
 
-# KHÔNG đặt 2 biến dưới đây ở [vars] (sẽ bị lộ trong wrangler.toml
-# / dashboard dưới dạng plaintext). Set bằng lệnh CLI (sẽ hỏi bạn
-# nhập giá trị, không lưu vào file này):
+# ==== MỚI: KV namespace cho Hệ thống A (rate limit login + cache đọc DATA) ====
+# Tạo bằng: npx wrangler kv namespace create DASHBOARD_KV
+# rồi dán "id" trả về vào đây.
+[[kv_namespaces]]
+binding = "DASHBOARD_KV"
+id = "28175c039cf14539af73a73ecbf41c8c"
+
+# ==== Route (tuỳ chọn) ====
+# Nếu bạn muốn Worker này phục vụ cả webhook Zalo lẫn dashboard trên
+# cùng 1 domain (VD api.yourdomain.com), khai báo route ở đây. Nếu vẫn
+# đang dùng URL workers.dev mặc định cho webhook thì bỏ qua phần này.
+# routes = [
+#   { pattern = "api.yourdomain.com/*", zone_name = "yourdomain.com" }
+# ]
+
+# KHÔNG đặt các biến dưới đây ở [vars] (sẽ bị lộ dạng plaintext).
+# Set bằng lệnh CLI:
 #
-#   npx wrangler secret put GOOGLE_CLIENT_EMAIL
-#     -> dán giá trị "client_email" trong file JSON key của Service Account
+#   npx wrangler secret put GOOGLE_CLIENT_EMAIL     (đã có sẵn)
+#   npx wrangler secret put GOOGLE_PRIVATE_KEY      (đã có sẵn)
 #
-#   npx wrangler secret put GOOGLE_PRIVATE_KEY
-#     -> dán NGUYÊN VẸN giá trị "private_key" trong file JSON key
-#        (bao gồm cả -----BEGIN PRIVATE KEY----- / -----END PRIVATE KEY-----
-#        và các \n bên trong - worker tự xử lý cả 2 dạng \n literal
-#        lẫn xuống dòng thật)
+#   npx wrangler secret put SESSION_SECRET
+#     -> chuỗi ngẫu nhiên dài, VD: openssl rand -hex 32
 #
-# Sau khi set xong 2 secret trên, deploy lại:
+#   npx wrangler secret put FRONTEND_ORIGIN
+#     -> domain của frontend dashboard, VD: https://dashboard.yourdomain.com
+#        (không có dấu / ở cuối, phải khớp TUYỆT ĐỐI với domain thật -
+#        kể cả có/không "www" - nếu không CORS sẽ chặn)
+#
+# Sau khi set xong, deploy lại:
 #   npx wrangler deploy
